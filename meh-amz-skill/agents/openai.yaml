@@ -1,0 +1,6 @@
+interface:
+  display_name: "MEH Amazon Marketplace Intelligence"
+  short_description: "Localized Amazon research and listing HTML"
+  default_prompt: "Use $meh-amz-skill to analyze an Amazon marketplace competitor using the correct country postal code and local language, then produce the complete bilingual HTML report and listing package."
+policy:
+  allow_implicit_invocation: true
