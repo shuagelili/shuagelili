@@ -63,6 +63,12 @@ Organize the Listing across all modules using three dimensions:
 
 Use at least three distinct verified scenes when the product supports them. Do not claim a platform algorithm weight, ranking guarantee, or conversion uplift merely because the content is structured for AI shopping.
 
+## Experience-first copy
+
+Before drafting customer-visible copy, classify the product's primary experience mode: festive ritual, task completion, problem solving, daily comfort, display and atmosphere, exploration and learning, or portable/outdoor use. A festive product can be framed around a ritual or shared seasonal experience; an ordinary product should be framed around the task, pain point, routine, or completed outcome that its verified mechanism supports. Do not force a holiday narrative onto a non-seasonal product.
+
+Build each shopping scene as `buyer situation -> problem or desire -> verified product mechanism -> completed task -> concrete outcome`. Map distinct scenes across title, Highlights, bullets, description, use guide, keywords, images, and A+. Use at least three genuinely different scenes when the product supports them, and keep one primary benefit per bullet. Read [references/experience-first-copy-framework.md](references/experience-first-copy-framework.md) for mode selection, scene coverage, bullet architecture, description flow, and image/A+ mapping.
+
 ## Evidence and structured record
 
 Before drafting visible copy, create a `listing_record`. It is the source of truth for the final HTML. At minimum it contains:
