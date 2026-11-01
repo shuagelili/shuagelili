@@ -20,6 +20,8 @@ CHECKS = (
     ("bullets", "validate_bullets.py"),
     ("customer_copy", "scan_customer_copy.py"),
     ("listing_limits", "validate_listing_limits.py"),
+    ("highlights", "validate_highlights.py"),
+    ("listing_strategy", "validate_listing_strategy.py"),
 )
 
 

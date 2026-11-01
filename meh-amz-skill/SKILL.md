@@ -51,7 +51,7 @@ The exact format is enforced by `validate_bullets.py`; do not rely on visual for
 
 ### Description and field limits
 
-The product description target is 1,500-2,000 characters. Default limits are title at most 75 characters and Highlights at most 125 characters per item, subject to verified marketplace/category overrides. The saved text is measured by the deterministic limits validator.
+The product description target is 1,500-2,000 characters. Default limits are title at most 75 characters and Highlights at most 125 characters, subject to verified marketplace/category overrides. Highlights are optional and may be shown only when the selected final title is under 75 characters. When used, Highlights are one comma-separated string of concise feature/benefit phrases, not complete sentences; add only title-overflow details such as material, differentiators, audience, function, use case, or compatible products. Do not repeat any word already present in the selected title. The deterministic Highlights validator enforces these rules.
 
 ## Three semantic dimensions
 
@@ -78,6 +78,7 @@ Before drafting visible copy, create a `listing_record`. It is the source of tru
 - `scenarios`;
 - `review_objection_keyword_matrix`;
 - `keyword_controls`;
+- `keyword_strategy`, `bullet_copy_plan`, `description_voice_map`, and `attribute_inventory`;
 - `variant_listing_matrix`;
 - `publishable_fields`;
 - `publishable_claim_map`;
@@ -97,19 +98,33 @@ Keep these layers separate and connect them only when evidence supports the link
 
 Classify every retained keyword independently by `intent_stage`, `intent_type`, and `intent_family`. Keep negative keywords separate from forbidden terms. A keyword with no verified product response is an opportunity or hypothesis, not a customer-facing claim. When review data is unavailable, use `not_available` or `hypothesis`; never invent frequency, sentiment, or severity.
 
+## Keyword and field architecture
+
+These requirements supplement the existing field rules above; they do not relax or replace them.
+
+- **Title**: put the highest-volume eligible core product keyword first when measured keyword data is available. Record its source, demand metric, relevance, and supporting own-product fact in `keyword_strategy`. If no measured keyword source was supplied, record `status: not_available` and explain the limitation; do not invent search volume. Keep existing title limits, localization, and evidence rules.
+- **Five bullets**: retain exactly five bullets and the required `【全大写小标题】 : 内容` format. Before writing, create five `bullet_copy_plan` entries pairing each bullet with `what` (product/feature), `who` (buyer/audience), and `why` (need or benefit), plus eligible keyword IDs and evidence links. Write each customer-visible body as one coherent sentence that naturally uses a relevant high-demand phrase when keyword data supports it. Do not force an irrelevant or awkward exact-match term into a bullet. The script checks metadata, keyword phrase presence, and obvious sentence boundaries; naturalness, factual fit, and meaning remain reviewer checks.
+- **Description and voice queries**: keep the existing 1,500-2,000 character target and buyer-journey flow. Also prepare a `description_voice_map` with direct, evidence-backed answer excerpts for product identity, audience, usage, and contents or compatibility. Each excerpt must appear in the description. Review that a shopper asking a natural spoken question can understand the direct answer without relying on surrounding paragraphs. This is a content-structure goal only; do not claim guaranteed Alexa indexing, retrieval, ranking, or placement.
+- **Backend search terms**: provide `publishable_fields.backend_keywords` alongside frontend keywords. Use relevant, eligible vocabulary that adds coverage rather than repeating a complete phrase already present anywhere in customer-visible frontend copy or the frontend keyword field. If no eligible backend term remains, leave the field empty and record why in Chinese explanation. The deterministic validator checks phrase-level duplication.
+- **Complete product-attribute inventory**: compare all user-provided product specifications and source documents with `product_fact_ledger`, then mirror every ledger fact in `attribute_inventory` with its customer-search wording, disposition, and mapped Listing fields. Map publishable attributes to one or more fields; give excluded, unsupported, or unresolved attributes a reason in Chinese explanation. The validator checks ledger-to-inventory completeness and mapping; the operator must also reconcile the ledger against the original product materials because scripts cannot discover facts omitted from the record.
+
+Read [references/listing-record-schema.md](references/listing-record-schema.md) for the added structures and [references/validation-and-qa.md](references/validation-and-qa.md) for checks and semantic review boundaries.
+
 ## Variants
 
 For one ASIN, set `variant_listing_matrix.status` to `not_applicable`. For a parent/child family, keep parent/shared fields limited to shared facts and child fields limited to the matching child facts, keywords, and scenes. Never generalize a child-only size, color, pack count, material, compatibility, review theme, or keyword to the parent without explicit shared evidence.
 
 ## Automatic validation
 
-Run the aggregate gate after localization and before HTML rendering:
+Do not write the final HTML directly from raw notes. First save `listing_record.json`, then run the aggregate gate, and only after it passes render the HTML. The final delivery gate must be the only accepted completion path:
 
 ```powershell
-python scripts/validate_listing_record.py listing_record.json --output qa_validation.json
+python scripts/validate_delivery.py listing_record.json final.html --output delivery_validation.json
 ```
 
-It runs fact-ledger isolation, review-objection-keyword linkage, keyword controls, variants, bullet format, customer-copy scanning, and field limits. Every child must return `PASS`; aggregate `PASS` is the only accepted state. Missing scripts, invalid child JSON, timeouts, and exit code 2 produce `ERROR`; any child `FAIL` produces `FAIL` and exit code 1.
+This command requires both files. It runs fact-ledger isolation, review-objection-keyword linkage, keyword controls, variants, bullet format, customer-copy scanning, field limits, Highlights, and Listing strategy checks for keyword placement, What-Who-Why plans, voice-answer maps, backend deduplication, and attribute inventory, then checks that the rendered HTML contains the exact approved customer copy. Every child must return `PASS`; aggregate `PASS` and render `PASS` are required for delivery. Missing files, invalid child JSON, timeouts, or skipped render validation produce `ERROR`; any validation failure produces `FAIL`.
+
+Every populated `publishable_fields.<name>` value must be rendered exactly once inside an HTML element with `data-copy-field="publishable_fields.<name>"`. The HTML is a render target, not a new source of claims. Do not mark QA as PASS when `delivery_validation.json` is absent or not `PASS`.
 
 After changing a validator or upgrading this skill, run the regression fixtures:
 
@@ -117,7 +132,7 @@ After changing a validator or upgrading this skill, run the regression fixtures:
 python scripts/test_validators.py
 ```
 
-The regression suite checks a clean record, legacy bullet formatting, internal review wording in customer copy, and a description shorter than 1,500 characters. It asserts actual exit codes, JSON status, and `failed_checks`.
+The regression suite checks a clean record, legacy bullet formatting, internal review wording, a description shorter than 1,500 characters, missing keyword/attribute metadata, a non-frontloaded core keyword, repeated backend phrases, an incomplete voice map, and unmapped bullet strategy. It asserts actual exit codes, JSON status, and `failed_checks`.
 
 For debugging, the individual checks remain available:
 
@@ -128,7 +143,9 @@ python scripts/validate_keyword_controls.py listing_record.json
 python scripts/validate_variants.py listing_record.json
 python scripts/validate_bullets.py listing_record.json
 python scripts/validate_listing_limits.py listing_record.json
+python scripts/validate_listing_strategy.py listing_record.json
 python scripts/scan_customer_copy.py listing_record.json
+python scripts/validate_render_contract.py listing_record.json final.html
 ```
 
 Individual PASS results never override an aggregate FAIL or ERROR. Read [references/validation-and-qa.md](references/validation-and-qa.md) for the full QA gate and failure interpretation.
