@@ -28,6 +28,9 @@ def valid_record() -> dict[str, Any]:
         {"id": "kw4", "term": "freezer organization", "search_volume": 500, "source_ref": "keyword-workbook.xlsx:Sheet1", "eligible": True, "product_fact_ids": ["f1"]},
         {"id": "kw5", "term": "bread slice holder", "search_volume": 300, "source_ref": "keyword-workbook.xlsx:Sheet1", "eligible": True, "product_fact_ids": ["f1"]},
     ]
+    for i, term in enumerate(terms):
+        term["source_candidate_ids"] = [f"src{i}"]
+        term["demand_source_candidate_id"] = f"src{i}"
     bullets = [
         "【EASY BREAD STORAGE】 : This bread freezer box keeps slices organized for home bakers.",
         "【SOURDOUGH ROUTINE】 : A home baker can use sourdough storage slots to keep slices separated.",
@@ -35,10 +38,32 @@ def valid_record() -> dict[str, Any]:
         "【INDIVIDUAL SLICES】 : Freezer organization helps keep each portion ready to retrieve.",
         "【PREP AHEAD】 : A bread slice holder supports a practical kitchen routine.",
     ]
+    source_ledger = [
+        {
+            "candidate_id": f"src{i}", "raw_term": term["term"], "normalized_term": term["term"],
+            "source_type": "user_workbook", "source_ref": f"keyword-workbook.xlsx:Sheet1:row{i + 1}",
+            "evidence_ids": ["e1"], "marketplace": "US", "collected_at": "2026-10-01",
+            "metric": {"name": "search_volume", "value": term["search_volume"], "unit": "searches", "period": "monthly"},
+            "brand_terms_detected": [], "brand_terms_removed": [], "canonical_keyword_id": term["id"],
+            "duplicate_action": "canonical", "eligibility": "eligible", "decision_reason": "Relevant to verified product fact f1.",
+            "selected_fields": ["title" if i == 0 else "bullets"], "demand_source_candidate_id": f"src{i}"
+        }
+        for i, term in enumerate(terms)
+    ]
     return {
+        "context": {"marketplace": "US"},
         "evidence_ledger": [{"id": "e1", "claim": "product type", "value": "bread freezer box", "source_type": "user", "source_ref": "input", "scope": "product", "status": "verified"}],
         "product_fact_ledger": [{"id": "f1", "attribute": "product_type", "value": "bread freezer box", "ownership": "own", "source_evidence_ids": ["e1"], "status": "verified", "disposition": "publishable"}],
-        "keyword_strategy": {"status": "complete", "primary_keyword_id": "kw1", "required_frontend_keyword_ids": ["kw1", "kw2", "kw3", "kw4", "kw5"], "keywords": terms},
+        "keyword_strategy": {
+            "status": "complete", "primary_keyword_id": "kw1", "required_frontend_keyword_ids": ["kw1", "kw2", "kw3", "kw4", "kw5"], "keywords": terms,
+            "title_selection": {
+                "review_status": "human_reviewed", "selected_keyword_id": "kw1",
+                "selected_fit": {"relevance": "relevant", "naturalness": "natural"},
+                "selection_rationale": "Best relevant phrase for a concise, natural product title.",
+                "higher_demand_terms_not_selected": [],
+            },
+        },
+        "keyword_source_ledger": source_ledger,
         "publishable_fields": {
             "title": "Bread freezer box for home bakers",
             "bullets": bullets,
@@ -75,7 +100,8 @@ def run_case(script: Path, record: dict[str, Any], expected: int) -> dict[str, A
             payload = json.loads(completed.stdout)
         except json.JSONDecodeError:
             payload = {"status": "ERROR", "raw": completed.stdout, "stderr": completed.stderr}
-        return {"passed": completed.returncode == expected, "actual_exit": completed.returncode, "status": payload.get("status"), "findings": payload.get("findings", [])}
+        expected_status = "PASS" if expected == 0 else "FAIL"
+        return {"passed": completed.returncode == expected and payload.get("status") == expected_status, "actual_exit": completed.returncode, "status": payload.get("status"), "findings": payload.get("findings", [])}
 
 
 def main() -> int:
@@ -86,8 +112,11 @@ def main() -> int:
     clean = valid_record()
     cases: dict[str, tuple[dict[str, Any], int]] = {"clean": (clean, 0)}
     bad_title = copy.deepcopy(clean)
-    bad_title["publishable_fields"]["title"] = "Home baker bread freezer box"
-    cases["core_keyword_not_frontloaded"] = (bad_title, 1)
+    bad_title["publishable_fields"]["title"] = "Home baker storage container"
+    cases["primary_keyword_missing_from_title"] = (bad_title, 1)
+    naturally_placed = copy.deepcopy(clean)
+    naturally_placed["publishable_fields"]["title"] = "For home bakers: bread freezer box"
+    cases["primary_keyword_naturally_placed"] = (naturally_placed, 0)
     bad_bullet = copy.deepcopy(clean)
     bad_bullet["bullet_copy_plan"][0]["who"] = ""
     cases["missing_what_who_why"] = (bad_bullet, 1)
@@ -119,6 +148,41 @@ def main() -> int:
     missing_keyword_source = copy.deepcopy(clean)
     missing_keyword_source["keyword_strategy"]["keywords"][0]["source_ref"] = ""
     cases["keyword_without_frequency_source"] = (missing_keyword_source, 1)
+    missing_source_ledger = copy.deepcopy(clean)
+    del missing_source_ledger["keyword_source_ledger"]
+    cases["missing_keyword_source_ledger"] = (missing_source_ledger, 1)
+    missing_raw_term = copy.deepcopy(clean)
+    missing_raw_term["keyword_source_ledger"][0]["raw_term"] = ""
+    cases["keyword_source_without_raw_term"] = (missing_raw_term, 1)
+    source_does_not_map = copy.deepcopy(clean)
+    source_does_not_map["keyword_source_ledger"][0]["canonical_keyword_id"] = "unknown"
+    cases["keyword_source_without_canonical_link"] = (source_does_not_map, 1)
+    mismatched_metric = copy.deepcopy(clean)
+    mismatched_metric["keyword_strategy"]["keywords"][0]["search_volume"] = 999
+    cases["keyword_metric_conflicts_with_source"] = (mismatched_metric, 1)
+    higher_demand_not_selected = copy.deepcopy(clean)
+    higher_demand_not_selected["keyword_strategy"]["keywords"].append({
+        "id": "kw6", "term": "frozen bread storage box", "search_volume": 1800,
+        "source_ref": "keyword-workbook.xlsx:Sheet1", "eligible": True, "product_fact_ids": ["f1"],
+        "source_candidate_ids": ["src6"], "demand_source_candidate_id": "src6",
+    })
+    higher_demand_not_selected["keyword_source_ledger"].append({
+        "candidate_id": "src6", "raw_term": "frozen bread storage box", "normalized_term": "frozen bread storage box",
+        "source_type": "user_workbook", "source_ref": "keyword-workbook.xlsx:Sheet1:row7",
+        "evidence_ids": ["e1"], "marketplace": "US", "collected_at": "2026-10-01",
+        "metric": {"name": "search_volume", "value": 1800, "unit": "searches", "period": "monthly"},
+        "brand_terms_detected": [], "brand_terms_removed": [], "canonical_keyword_id": "kw6",
+        "duplicate_action": "canonical", "eligibility": "eligible", "decision_reason": "Relevant phrase, retained for evaluation.",
+        "selected_fields": [], "demand_source_candidate_id": "src6",
+    })
+    higher_demand_not_selected["keyword_strategy"]["title_selection"]["higher_demand_terms_not_selected"] = [{
+        "candidate_id": "src6", "title_relevance": "relevant", "naturalness": "awkward",
+        "reason_code": "awkward_localization", "reason": "The phrase is less idiomatic in the target marketplace than the selected title wording.",
+    }]
+    cases["higher_demand_term_has_reviewed_reason"] = (higher_demand_not_selected, 0)
+    missing_higher_demand_reason = copy.deepcopy(higher_demand_not_selected)
+    missing_higher_demand_reason["keyword_strategy"]["title_selection"]["higher_demand_terms_not_selected"] = []
+    cases["higher_demand_term_missing_reason"] = (missing_higher_demand_reason, 1)
     results = {name: run_case(script, record, expected) for name, (record, expected) in cases.items()}
     failed = [name for name, result in results.items() if not result["passed"]]
     output = {"status": "PASS" if not failed else "FAIL", "cases": results, "failed_cases": failed}

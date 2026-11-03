@@ -71,13 +71,13 @@ Build each shopping scene as `buyer situation -> problem or desire -> verified p
 
 ## Evidence and structured record
 
-Before drafting visible copy, create a `listing_record`. It is the source of truth for the final HTML. At minimum it contains:
+Before drafting visible copy, create a `listing_record`. It is the source of truth for the final HTML. Resolve `context.marketplace` first and store applicable field limits in `context.limits`; each configured limit uses `min`, `max`, `count_unit`, and `source_ref` as applicable. At minimum it contains:
 
 - `context`: mode, resolved marketplace, ASIN roles, and limits;
 - `evidence_ledger` and `product_fact_ledger`;
 - `scenarios`;
 - `review_objection_keyword_matrix`;
-- `keyword_controls`;
+- `keyword_controls` and `keyword_source_ledger`;
 - `keyword_strategy`, `bullet_copy_plan`, `description_voice_map`, and `attribute_inventory`;
 - `variant_listing_matrix`;
 - `publishable_fields`;
@@ -102,13 +102,23 @@ Classify every retained keyword independently by `intent_stage`, `intent_type`, 
 
 These requirements supplement the existing field rules above; they do not relax or replace them.
 
-- **Title**: put the highest-volume eligible core product keyword first when measured keyword data is available. Record its source, demand metric, relevance, and supporting own-product fact in `keyword_strategy`. If no measured keyword source was supplied, record `status: not_available` and explain the limitation; do not invent search volume. Keep existing title limits, localization, and evidence rules.
+### Keyword source and processing record
+
+Before selecting or placing keywords, create a `keyword_source_ledger` with one row for every candidate considered, including candidates later merged or excluded. Preserve the exact source term and a normalized comparison form; do not replace the raw term with a cleaned version. Each row must record a stable `candidate_id`, `source_type`, pinpoint `source_ref` (file/tool, sheet or report, row/record, and retrieval date when available), evidence IDs, target marketplace, and metric context (`name`, `value`, `unit`, `period`, and scope when available). Use `null` for an unavailable metric value and state the limitation in the decision reason; never infer a value.
+
+For each candidate, record `brand_terms_detected` with the term and ownership (`own`, `competitor`, or `unknown`), any `brand_terms_removed`, the resulting `normalized_term`, `canonical_keyword_id`, `duplicate_action` (`canonical`, `merged_into`, or `excluded`), eligibility, a decision reason, and `selected_fields`. Brand removal and deduplication are transformations, not silent edits: retain the source row and explain the exact change. Never convert a competitor brand into an eligible generic term unless the remaining phrase is independently relevant and supported by an own-product fact. Keep unknown brand ownership out of customer-facing fields until resolved.
+
+In `keyword_strategy.keywords`, retain the canonical term and its `source_candidate_ids`; identify `demand_source_candidate_id` for the exact source row supplying `search_volume`, and link eligible terms to supporting own-product fact IDs. Do not combine demand values from different marketplaces, tools, metric definitions, units, scopes, or reporting periods. If duplicate rows disagree, select a clearly identified authoritative observation or leave demand unresolved; record the conflict and rationale. Keep rejected candidates and their reasons in `keyword_source_ledger` so the final selection can be reproduced.
+
+Map every retained keyword to its intended field(s) in the source ledger and confirm the placement against `publishable_fields` before delivery. A keyword appearing in a field is not by itself evidence that its source, relevance, or factual fit is acceptable. Competitor-derived vocabulary can inform search intent, but only verified own-product facts authorize customer-facing claims. When there is no keyword dataset, set `keyword_strategy.status` to `not_available`, explain why, and do not fabricate candidates, demand metrics, or source rows.
+
+- **Title**: when measured demand is available, prioritize higher-demand keywords only among candidates that are factually relevant and read naturally in the target marketplace. The selected phrase must appear in the title, but does not have to be the first words. Record a human-reviewed relevance/naturalness decision and selection rationale in `keyword_strategy.title_selection`. For every comparable higher-volume source term not selected, record its source candidate ID, title relevance, naturalness, reason code, and explanation. Compare demand only when marketplace, metric definition, unit, period, scope, and comparison source are compatible. If no measured keyword source was supplied, record `status: not_available` and explain the limitation; do not invent search volume. Keep existing title limits, localization, and evidence rules.
 - **Five bullets**: retain exactly five bullets and the required `【全大写小标题】 : 内容` format. Before writing, create five `bullet_copy_plan` entries pairing each bullet with `what` (product/feature), `who` (buyer/audience), and `why` (need or benefit), plus eligible keyword IDs and evidence links. Write each customer-visible body as one coherent sentence that naturally uses a relevant high-demand phrase when keyword data supports it. Do not force an irrelevant or awkward exact-match term into a bullet. The script checks metadata, keyword phrase presence, and obvious sentence boundaries; naturalness, factual fit, and meaning remain reviewer checks.
 - **Description and voice queries**: keep the existing 1,500-2,000 character target and buyer-journey flow. Also prepare a `description_voice_map` with direct, evidence-backed answer excerpts for product identity, audience, usage, and contents or compatibility. Each excerpt must appear in the description. Review that a shopper asking a natural spoken question can understand the direct answer without relying on surrounding paragraphs. This is a content-structure goal only; do not claim guaranteed Alexa indexing, retrieval, ranking, or placement.
 - **Backend search terms**: provide `publishable_fields.backend_keywords` alongside frontend keywords. Use relevant, eligible vocabulary that adds coverage rather than repeating a complete phrase already present anywhere in customer-visible frontend copy or the frontend keyword field. If no eligible backend term remains, leave the field empty and record why in Chinese explanation. The deterministic validator checks phrase-level duplication.
 - **Complete product-attribute inventory**: compare all user-provided product specifications and source documents with `product_fact_ledger`, then mirror every ledger fact in `attribute_inventory` with its customer-search wording, disposition, and mapped Listing fields. Map publishable attributes to one or more fields; give excluded, unsupported, or unresolved attributes a reason in Chinese explanation. The validator checks ledger-to-inventory completeness and mapping; the operator must also reconcile the ledger against the original product materials because scripts cannot discover facts omitted from the record.
 
-Read [references/listing-record-schema.md](references/listing-record-schema.md) for the added structures and [references/validation-and-qa.md](references/validation-and-qa.md) for checks and semantic review boundaries.
+Read [references/listing-record-schema.md](references/listing-record-schema.md) for the source-ledger fields and ownership invariants, and [references/validation-and-qa.md](references/validation-and-qa.md) for checks and semantic review boundaries.
 
 ## Variants
 
@@ -116,23 +126,24 @@ For one ASIN, set `variant_listing_matrix.status` to `not_applicable`. For a par
 
 ## Automatic validation
 
-Do not write the final HTML directly from raw notes. First save `listing_record.json`, then run the aggregate gate, and only after it passes render the HTML. The final delivery gate must be the only accepted completion path:
+Do not write the final HTML directly from raw notes. First save `listing_record.json`, then run the pre-render gate. It runs the aggregate validators and deterministic field-limit measurements; render the HTML only after `PASS`. After rendering, run the delivery gate, which repeats preflight and checks the saved HTML against approved copy:
 
 ```powershell
+python scripts/preflight_listing.py listing_record.json
 python scripts/validate_delivery.py listing_record.json final.html --output delivery_validation.json
 ```
 
-This command requires both files. It runs fact-ledger isolation, review-objection-keyword linkage, keyword controls, variants, bullet format, customer-copy scanning, field limits, Highlights, and Listing strategy checks for keyword placement, What-Who-Why plans, voice-answer maps, backend deduplication, and attribute inventory, then checks that the rendered HTML contains the exact approved customer copy. Every child must return `PASS`; aggregate `PASS` and render `PASS` are required for delivery. Missing files, invalid child JSON, timeouts, or skipped render validation produce `ERROR`; any validation failure produces `FAIL`.
+The preflight requires a saved record with a resolved marketplace. It measures title, Highlights, bullets, description, frontend/backend keywords, use guide, image text, and A+ text; additional fields are measured when a limit is configured. Defaults are title 75 characters, description 1,500-2,000 characters, and Highlights 125 characters. Configured rules may override these values and declare `count_unit` as `unicode_code_points`, `utf8_bytes`, or `utf16_code_units`, plus a `source_ref`. Invalid ranges, units, or values fail closed. Configure actual marketplace/category requirements when known; do not present defaults as verified Amazon policy. Review the JSON measurements before rendering. The delivery command requires both the record and final HTML; it reruns preflight and then checks that the rendered HTML contains the exact approved customer copy. Every child must return `PASS`; aggregate `PASS` and render `PASS` are required for delivery. Missing files, invalid child JSON, timeouts, or skipped render validation produce `ERROR`; any validation failure produces `FAIL`.
 
 Every populated `publishable_fields.<name>` value must be rendered exactly once inside an HTML element with `data-copy-field="publishable_fields.<name>"`. The HTML is a render target, not a new source of claims. Do not mark QA as PASS when `delivery_validation.json` is absent or not `PASS`.
 
-After changing a validator or upgrading this skill, run the regression fixtures:
+After changing a validator or upgrading this skill, run the regression fixtures (including keyword source-ledger and field-limit preflight failures):
 
 ```powershell
 python scripts/test_validators.py
 ```
 
-The regression suite checks a clean record, legacy bullet formatting, internal review wording, a description shorter than 1,500 characters, missing keyword/attribute metadata, a non-frontloaded core keyword, repeated backend phrases, an incomplete voice map, and unmapped bullet strategy. It asserts actual exit codes, JSON status, and `failed_checks`.
+The regression suite checks a clean record, legacy bullet formatting, internal review wording, a description shorter than 1,500 characters, missing keyword/attribute metadata, a selected keyword absent from the title, missing reasons for higher-demand alternatives, repeated backend phrases, an incomplete voice map, and unmapped bullet strategy. It asserts actual exit codes, JSON status, and `failed_checks`.
 
 For debugging, the individual checks remain available:
 

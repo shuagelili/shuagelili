@@ -46,14 +46,14 @@ def main() -> int:
         emit(payload, args.output)
         return 2
     script_dir = Path(__file__).resolve().parent
-    aggregate_exit, aggregate = run([sys.executable, str(script_dir / "validate_listing_record.py"), str(args.json_path)], args.timeout)
-    if aggregate_exit != 0 or aggregate.get("status") != "PASS":
-        payload = {"status": "FAIL" if aggregate_exit == 1 else "ERROR", "gate": "aggregate_validation", "aggregate": aggregate, "render": {"status": "SKIPPED", "reason": "aggregate QA must pass before render validation"}}
+    preflight_exit, preflight = run([sys.executable, str(script_dir / "preflight_listing.py"), str(args.json_path), "--timeout", str(args.timeout)], args.timeout + 5)
+    if preflight_exit != 0 or preflight.get("status") != "PASS":
+        payload = {"status": "FAIL" if preflight_exit == 1 else "ERROR", "gate": "pre_render_preflight", "preflight": preflight, "render": {"status": "SKIPPED", "reason": "pre-render QA and field limits must pass before render validation"}}
         emit(payload, args.output)
-        return aggregate_exit if aggregate_exit in {1, 2} else 2
+        return preflight_exit if preflight_exit in {1, 2} else 2
     render_exit, render = run([sys.executable, str(script_dir / "validate_render_contract.py"), str(args.json_path), str(args.html_path)], args.timeout)
     status = "PASS" if render_exit == 0 and render.get("status") == "PASS" else ("FAIL" if render_exit == 1 else "ERROR")
-    payload = {"status": status, "gate": "delivery", "aggregate": aggregate, "render": render, "input": {"listing_record": str(args.json_path), "html": str(args.html_path)}}
+    payload = {"status": status, "gate": "delivery", "preflight": preflight, "render": render, "input": {"listing_record": str(args.json_path), "html": str(args.html_path)}}
     emit(payload, args.output)
     return 0 if status == "PASS" else render_exit
 

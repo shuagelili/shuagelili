@@ -24,6 +24,7 @@ def valid_record() -> dict[str, Any]:
     lead = "Bread freezer box is a storage product for home bakers. It is for home bakers who prepare bread ahead. Place slices inside before freezing. The box stores sliced bread for organized freezer use. "
     description = (lead + "A verified product description for everyday use. " * 34).strip()
     return {
+        "context": {"marketplace": "US"},
         "evidence_ledger": [{
             "id": "e1", "claim": "product type", "value": "verified box",
             "source_type": "user", "source_ref": "input", "scope": "product", "status": "verified",
@@ -128,6 +129,16 @@ def run_missing_record_case(script_dir: Path) -> dict[str, Any]:
         return {"expected_exit": 2, "actual_exit": completed.returncode, "passed": completed.returncode == 2, "status": payload.get("status"), "gate": payload.get("gate")}
 
 
+def run_preflight_case(script_dir: Path, record: dict[str, Any], expected: int) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="meh-amz-preflight-") as directory:
+        path = Path(directory) / "listing_record.json"
+        path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+        completed = subprocess.run([sys.executable, str(script_dir / "preflight_listing.py"), str(path)], capture_output=True, text=True, encoding="utf-8", errors="replace", env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False)
+        payload = json.loads(completed.stdout) if completed.stdout.strip() else {"status": "ERROR"}
+        passed = completed.returncode == expected and payload.get("html_rendered") is False
+        return {"expected_exit": expected, "actual_exit": completed.returncode, "passed": passed, "status": payload.get("status"), "stage": payload.get("stage"), "html_rendered": payload.get("html_rendered")}
+
+
 def main() -> int:
     configure_stdout()
     parser = argparse.ArgumentParser(description="Regression-test all deterministic Listing validators.")
@@ -170,6 +181,8 @@ def main() -> int:
     results = {name: run_case(aggregate, record, expected) for name, (record, expected) in cases.items()}
     failed = [name for name, result in results.items() if not result["passed"]]
     delivery_results = {
+        "preflight_clean_record": run_preflight_case(script_dir, clean, 0),
+        "preflight_rejects_short_description": run_preflight_case(script_dir, short_description, 1),
         "delivery_clean": run_delivery_case(script_dir, clean, 0),
         "delivery_missing_marker": run_delivery_case(script_dir, clean, 1, omit_marker="publishable_fields.bullets"),
         "delivery_duplicate_marker": run_delivery_case(script_dir, clean, 1, duplicate_marker="publishable_fields.title"),
@@ -180,6 +193,9 @@ def main() -> int:
     strategy_suite = subprocess.run([sys.executable, str(script_dir / "test_listing_strategy.py")], capture_output=True, text=True, encoding="utf-8", errors="replace", env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False)
     strategy_payload = json.loads(strategy_suite.stdout) if strategy_suite.stdout.strip() else {"status": "ERROR", "stderr": strategy_suite.stderr}
     delivery_results["listing_strategy_regression_suite"] = {"expected_exit": 0, "actual_exit": strategy_suite.returncode, "passed": strategy_suite.returncode == 0 and strategy_payload.get("status") == "PASS", "status": strategy_payload.get("status")}
+    limit_suite = subprocess.run([sys.executable, str(script_dir / "test_listing_limits.py")], capture_output=True, text=True, encoding="utf-8", errors="replace", env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False)
+    limit_payload = json.loads(limit_suite.stdout) if limit_suite.stdout.strip() else {"status": "ERROR", "stderr": limit_suite.stderr}
+    delivery_results["listing_limits_regression_suite"] = {"expected_exit": 0, "actual_exit": limit_suite.returncode, "passed": limit_suite.returncode == 0 and limit_payload.get("status") == "PASS", "status": limit_payload.get("status")}
     delivery_failed = [name for name, result in delivery_results.items() if not result["passed"]]
     output = {"status": "PASS" if not failed and not delivery_failed else "FAIL", "cases": results, "delivery_cases": delivery_results, "failed_cases": failed + delivery_failed}
     print(json.dumps(output, ensure_ascii=False, indent=2))
